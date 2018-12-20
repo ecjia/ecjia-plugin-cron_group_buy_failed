@@ -59,52 +59,73 @@ class cron_group_buy_failed extends CronAbstract
      */
     public function run()
     {
-        $act_id_list = RC_DB::table('goods_activity')->where('store_id', '!=', 0)->where('is_finished', GBS_FAIL)->lists('act_id');
+        $act_id_list = RC_DB::table('goods_activity')->where('store_id', '!=', 0)->where('is_finished', GBS_FAILED)->lists('act_id');
 
         if (!empty($act_id_list)) {
-            $res = RC_DB::table('order_info as o')->leftJoin('order_goods as g', RC_DB::raw('o.order_id'), '=', RC_DB::raw('g.order_id'))
-                ->select(RC_DB::raw('o.consignee, o.user_id, o.mobile, o.order_id, g.goods_name'))
-                ->where(RC_DB::raw('o.extension_code'), 'group_buy')
-                ->whereIn(RC_DB::raw('o.extension_id'), $act_id_list)
-                ->where(RC_DB::raw('o.order_status'), OS_CONFIRMED)
-                ->take(50)
-                ->get();
+            RC_Loader::load_app_func('admin_order', 'orders');
 
-            $orm_user_db = RC_Model::model('orders/orm_users_model');
+            foreach ($act_id_list as $k => $v) {
+                $group_buy = $this->group_buy_info($v['act_id']);
 
-            if (!empty($res)) {
-                foreach ($res as $order) {
-                    $options  = array(
-                        'mobile' => $order['mobile'],
-                        'event'  => 'sms_groupbuy_activity_failed',
-                        'value'  => array(
-                            'user_name'  => $order['consignee'],
-                            'store_name' => $_SESSION['store_name'],
-                            'goods_name' => $order['goods_name']
-                        )
-                    );
-                    $response = RC_Api::api('sms', 'send_event_sms', $options);
-                    if (is_ecjia_error($response)) {
-                        return $this->showmessage($response->get_error_message(), ecjia::MSGTYPE_JSON | ecjia::MSGSTAT_ERROR);
+                if ($group_buy['valid_order'] > 0) {
+                    $res = RC_DB::table('order_info')
+                        ->where('extension_code', 'group_buy')
+                        ->where('extension_id', $v['act_id'])
+                        ->where('order_status', OS_CONFIRMED)
+                        ->orWhere('order_status', OS_UNCONFIRMED)
+                        ->get();
+
+                    $orm_user_db = RC_Model::model('orders/orm_users_model');
+
+                    if (!empty($res)) {
+                        foreach ($res as $order) {
+                            // 修改订单状态为已取消，付款状态为未付款
+                            $order['order_status'] = OS_CANCELED;
+                            $order['to_buyer']     = RC_Lang::get('groupbuy::groupbuy.cancel_order_reason');
+                            $order['pay_status']   = PS_UNPAYED;
+                            $order['pay_time']     = 0;
+                            /* 如果使用余额或有已付款金额，退回帐户余额 */
+                            $money = $order['surplus'] + $order['money_paid'];
+                            if ($money > 0) {
+                                $order['surplus']      = 0;
+                                $order['money_paid']   = 0;
+                                $order['order_amount'] = $money;
+                                // 退款到账户余额
+                                order_refund($order, 1, RC_Lang::get('groupbuy::groupbuy.cancel_order_reason') . ':' . $order['order_sn'], $money);
+                            }
+                            /* 更新订单 */
+                            update_order($order['order_id'], $order);
+
+                            $options  = array(
+                                'mobile' => $order['mobile'],
+                                'event'  => 'sms_groupbuy_activity_failed',
+                                'value'  => array(
+                                    'user_name'  => $order['consignee'],
+                                    'store_name' => $_SESSION['store_name'],
+                                    'goods_name' => $order['goods_name']
+                                )
+                            );
+                            $response = RC_Api::api('sms', 'send_event_sms', $options);
+
+                            //消息通知
+                            $user_name = RC_DB::table('users')->where('user_id', $order['user_id'])->pluck('user_name');
+                            $user_ob   = $orm_user_db->find($order['user_id']);
+
+                            $groupbuy_data      = array(
+                                'title' => '团购活动失败结束',
+                                'body'  => '您在' . $_SESSION['store_name'] . '店铺参加的商品' . $order['goods_name'] . '的团购活动现已失败结束，我们将尽快为你退款。',
+                                'data'  => array(
+                                    'user_id'    => $order['user_id'],
+                                    'user_name'  => $user_name,
+                                    'store_name' => $_SESSION['store_name'],
+                                    'goods_name' => $order['goods_name'],
+                                    'order_id'   => $order['order_id'],
+                                ),
+                            );
+                            $push_groupbuy_data = new GroupbuyActivitySucceed($groupbuy_data);
+                            RC_Notification::send($user_ob, $push_groupbuy_data);
+                        }
                     }
-
-                    //消息通知
-                    $user_name = RC_DB::table('users')->where('user_id', $order['user_id'])->pluck('user_name');
-                    $user_ob   = $orm_user_db->find($order['user_id']);
-
-                    $groupbuy_data      = array(
-                        'title' => '团购活动失败结束',
-                        'body'  => '您在' . $_SESSION['store_name'] . '店铺参加的商品' . $order['goods_name'] . '的团购活动现已失败结束，我们将尽快为你退款。',
-                        'data'  => array(
-                            'user_id'    => $order['user_id'],
-                            'user_name'  => $user_name,
-                            'store_name' => $_SESSION['store_name'],
-                            'goods_name' => $order['goods_name'],
-                            'order_id'   => $order['order_id'],
-                        ),
-                    );
-                    $push_groupbuy_data = new GroupbuyActivitySucceed($groupbuy_data);
-                    RC_Notification::send($user_ob, $push_groupbuy_data);
                 }
             }
         }
