@@ -49,6 +49,8 @@
  */
 defined('IN_ECJIA') or exit('No permission resources.');
 
+use Ecjia\App\Cron\CronAbstract;
+
 class cron_group_buy_failed extends CronAbstract
 {
 
@@ -57,7 +59,7 @@ class cron_group_buy_failed extends CronAbstract
      */
     public function run()
     {
-        RC_Loader::load_app_class('groupbuy', 'groupbuy_activity_failed', false);
+        RC_Loader::load_app_class('groupbuy_activity_failed', 'groupbuy', false);
 
         groupbuy_activity_failed::init();
     }
@@ -93,7 +95,7 @@ class cron_group_buy_failed extends CronAbstract
 
         return $this->loadPluginData(RC_Plugin::plugin_dir_path(__FILE__) . '/languages/' . $locale . '/plugin.lang.php', $key, $default);
     }
-    
+
 }
 
 // end
