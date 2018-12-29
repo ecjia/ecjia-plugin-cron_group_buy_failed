@@ -59,9 +59,9 @@ class cron_group_buy_failed extends CronAbstract
      */
     public function run()
     {
-        RC_Loader::load_app_class('groupbuy_activity_failed', 'groupbuy', false);
+        $result = (new Ecjia\App\Groupbuy\GroupbuyActivityFailed)->runCronJob();
 
-        groupbuy_activity_failed::init();
+        return $result;
     }
 
     /**
