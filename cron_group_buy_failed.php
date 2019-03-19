@@ -72,6 +72,7 @@ class plugin_cron_group_buy_failed {
 }
 
 Ecjia_PluginManager::extend('cron_group_buy_failed', function() {
+    RC_Locale::loadPluginTextdomain('cron_group_buy_failed');
     require_once RC_Plugin::plugin_dir_path(__FILE__) . 'cron_group_buy_failed.class.php';
     return new cron_group_buy_failed();
 });
